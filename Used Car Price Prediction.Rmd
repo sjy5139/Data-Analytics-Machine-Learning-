@@ -1,0 +1,413 @@
+---
+title: "Used Card Prediction Project"
+output: html_document
+---
+```{r}
+library(dplyr, quietly = TRUE)
+library(ggplot2, quietly = TRUE)
+library(ggpubr, quietly = TRUE)
+library(descr, quietly = TRUE)
+library(Hmisc, quietly = TRUE)
+library(MASS, quietly = TRUE)
+library(RcmdrMisc, quietly = TRUE)
+library(readxl, quietly = TRUE)
+library(caret, quietly = TRUE)
+library(ggcorrplot, quietly = TRUE)
+library(Metrics, quietly = TRUE)
+library(glmnet, quietly = TRUE)
+library(randomForest, quietly = TRUE)
+```
+As there was a lot of cells in our data set that was empty without having Null concept inside of them, we use "na.string" command to address that.
+```{r}
+df <- read.csv("~/Courses/Fall 1 Duke/Data science for business/Team project/vehicles.csv", na.strings = c(""))
+summary(df)
+```
+First, let's see if there is any duplicate records in our data set.
+```{r}
+sum(duplicated(df[, -1]))
+```
+As can be seen there is no duplicate records in our data set.
+We will start by eliminating columns that don't help us predict the price of a car or in any other aspect of this analysis We decided to eliminate "id", "url", "region_url", "vin", "image_url" columns. Furthermore, we eliminated "county" column as all of its rows are NULL. Another point is that we also decided to eliminate "size" column as 76% of its value are NULL and the content of that column is also uninformative. Another column that is eliminated is "description" as it will not help us in any aspect of our analysis. "region" is also neglected as the "state" column will help us understand whether the location affects the price of a sold car.
+```{r}
+df = df[, -c(1, 2, 3, 4, 15, 17 ,20, 21 ,22)]
+summary(df)
+```
+```{r}
+unique(df$manufacturer)
+```
+To make the analysis more simple, we have decided to work on German's-and-Japan's-made vehicles. We didn't include "porche", its spelling is also incorrect,  as there are only six records for this manufacturer. 
+```{r}
+df1 = df
+df1 = df1 %>% filter(manufacturer == "audi" | manufacturer == "mercedes-benz" | manufacturer == "bmw" | manufacturer == "volkswagen" | manufacturer=='toyota'| manufacturer=="mitsubishi"| manufacturer=="subaru"| manufacturer=="nissan"| manufacturer=="lexus"| manufacturer=="honda"| manufacturer=="acura"| manufacturer=="mazda"| manufacturer=="infiniti")
+unique(df1$manufacturer)
+```
+```{r}
+table(df1$manufacturer)
+```
+At this point, we need to investigate our dependent variable.
+We have 8572 cars with the price value of zero. We will get rid of this cars to make our model more sound as these data points don't make any sense.
+```{r}
+dim(df1 %>% filter(price == 0))
+```
+
+```{r}
+df1 = df1 %>% filter(price > 0)
+sum(is.na(df1$price))
+summary(df1)
+```
+Furthermore, if we consider the high values of price column, we would see some bizarre data points. We have 10 vehicles that have prices higher or equal to 200,000 USD which , based on the model of the cars, we believe that must be some typo. We will eliminate them from our model. 
+```{r}
+dim(df1 %>% filter(price >= 200000))
+df1 = df1 %>% filter(price < 200000)
+```
+We noticed that there are a lot of missing values in our data set. A thorough investigation is needed. 
+```{r}
+sum(is.na(df1$year))
+sum(is.na(df1$manufacturer))
+sum(is.na(df1$model))
+sum(is.na(df1$condition))
+sum(is.na(df1$cylinders))
+```
+
+```{r}
+sum(is.na(df1$fuel))
+sum(is.na(df1$odometer))
+sum(is.na(df1$title_status))
+sum(is.na(df1$transmission))
+sum(is.na(df1$drive))
+sum(is.na(df1$type))
+sum(is.na(df1$paint_color))
+sum(is.na(df1$state))
+```
+As can be seen there are a lot of Null values in our data set. 
+There are a set of approaches that can be implemented to fill the NA values. Using the mean or median of each column, using neural network, deleting NA rows, and so on. As we have a relatively massive data set, we have the luxury of eliminating all of the rows with NA values in their columns and still end up having a big enough data set to conduct our analysis.
+```{r}
+df2 = na.omit(df1)
+```
+
+```{r}
+table(df2$manufacturer)
+```
+Now, we can deep dive into some EDA.
+```{r}
+df2 %>% ggplot(aes(price)) + geom_histogram( binwidth  = 1000)
+```
+As can be seen most of the cars' price are between 1$ and 70,000$. We decided to get rid of records with prices below 1000 USD. The reason is that when we evaluate the model and year of the cars, we noticed that these records must be probably some type of typo. Actually there are 449 cars with price less than 1000$.
+```{r}
+dim(df2 %>% filter(price < 1000))
+df2 = df2 %>% filter(price >= 1000)
+df2 %>% ggplot(aes(price)) + geom_histogram(binwidth = 1000)
+```
+Obviously, we need to transform the price variable as it is the dependent variable of our model and if we want to run a linear regression, it should be distributed normally. 
+```{r}
+df2 %>% ggplot(aes(log(price))) + geom_histogram(binwidth = 0.1) 
+```
+```{r}
+df2 %>% ggplot(aes(year)) + geom_histogram(binwidth = 1)
+df2 %>% ggplot(aes(x=year, y = log(price))) + geom_point()
+```
+To make the analysis simpler, we decided to create our model for cars that were produced after 1995 only.
+```{r}
+df2 = df2 %>% filter(year >=1995 & year <= 2020)
+df2 %>% ggplot(aes(x=year, y = log(price))) + geom_point()
+```
+As can be seen, a positive relationship exists between year that the car was manufactured and the price of that car.
+```{r}
+df2 %>% ggplot(aes(x = factor(condition), y= log(price), fill = factor(condition))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+```{r}
+table(df2$condition)
+```
+
+
+```{r}
+df2 %>% ggplot(aes(x = factor(cylinders), y= log(price), fill = factor(cylinders))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+As can be seen, there is a somehow positive relationship between number of cylinders in a car and price of a car. Other point is that we have a group of cars which their number of cylinders is "other". 
+We decided to eliminate records with cylinders equal to other. 
+```{r}
+df2 = df2 %>% filter(cylinders != 'other')
+df2 %>% ggplot(aes(x = factor(cylinders), y= log(price), fill = factor(cylinders))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+
+
+```{r}
+df2 %>% ggplot(aes(x = factor(fuel), y= log(price), fill = factor(fuel))) + geom_boxplot() 
+```
+
+```{r}
+dim(df2 %>% filter(fuel == "other"))
+```
+We have 96 records with fuel of "other" which is a little confusing. We decided to eliminate them as they can be misleading.
+```{r}
+df2 = df2 %>% filter(fuel != 'other')
+df2 %>% ggplot(aes(x = factor(fuel), y= log(price), fill = factor(fuel))) + geom_boxplot() 
+```
+```{r}
+table(df2$fuel)
+```
+As can be seen, we also have only 12 cars with "electric" source of fuel which is not big enough to claim any significant effect of that type of fuel on the price of a car. As a result, we decided to eliminate that also.
+```{r}
+df2 = df2 %>% filter(fuel != "electric")
+df2 %>% ggplot(aes(x = factor(fuel), y= log(price), fill = factor(fuel))) + geom_boxplot() 
+```
+
+```{r}
+df2 %>% ggplot(aes(odometer)) + geom_histogram(binwidth = 20000)
+df2 %>% ggplot(aes(x= odometer, y=log(price))) + geom_point()
+```
+As can be seen most of the records fall in the area where their odometer is less than 300,000. We decided to filter out the rest of our records that have odometer higher than this amount as their occurrence is very rare and can be considered as outliers.
+```{r}
+df2 = df2 %>% filter(odometer <=300000)
+df2 %>% ggplot(aes(odometer)) + geom_histogram(binwidth = 5000)
+df2 %>% ggplot(aes(x= odometer, y=log(price))) + geom_point()
+```
+It seems like that there is a negative relationship between price and the miles taken by a car; however, to claim that we should group by the data set by the model of cars and then plot the relationship between odometer and price based on the model of each car. This relationship can be further investigated at the context of linear regression where we can control for all other variables and examine the effect of only one variable.
+```{r}
+table(df2$title_status)
+df2 %>% ggplot(aes(x = factor(title_status), y= log(price), fill = factor(title_status))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+We have decided to eliminate records with "title_status" of "missing" and "parts only" as they these variables have so few records that deprive us from getting any meaningful analysis out of them.
+```{r}
+df2 = df2 %>% filter(title_status != "missing" & title_status!= "parts only")
+```
+
+```{r}
+df2 %>% ggplot(aes(x = factor(transmission), y= log(price), fill = factor(transmission))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+dim(df2 %>% filter(transmission == "other"))
+```
+We need to eliminate records with transmission registered as "other". 
+```{r}
+df2 = df2 %>% filter(transmission != "other")
+df2 %>% ggplot(aes(x = factor(transmission), y= log(price), fill = factor(transmission))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+
+```{r}
+df2 %>% ggplot(aes(x = factor(drive), y= log(price), fill = factor(drive))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+```{r}
+df2 %>% ggplot(aes(x = factor(type), y= log(price), fill = factor(type))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+dim(df2 %>% filter(type == 'other'))
+
+```
+```{r}
+table(df2$type)
+```
+We think that it is likely that most of records that have "other" in their type column comes from the point that the owner didn't know a lot about the car, or just wanted to register the car as quickly as possible. Anyway, to make our model more solid, we decided to eliminate these 182 records in addition to the "bus" type which contains only one record.
+```{r}
+df2 = df2 %>% filter(type != "other" & type != "bus")
+df2 %>% ggplot(aes(x = factor(type), y= log(price), fill = factor(type))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+
+```{r}
+df2 %>% ggplot(aes(x = factor(paint_color), y= log(price), fill = factor(paint_color))) + geom_boxplot() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+```
+The last step in our data cleaning process is transforming "manufacturer" and "model" columns. If we run linear regression with them, that will impose a great computational burden on our system. On the other hand, maybe the most important factor in determining the price of a car is its model and manufacturer. However, after running a linear regression, we noticed that handling the massive variety of car models prove to be out of control. As a result, we decided to eliminate model of cars and consider only the manufacturer as a proxy for the difference in the quality of cars.
+```{r}
+
+df2 = df2[ , -4]
+summary(df2)
+```
+```{r}
+#write.csv(df2 ,file = "CleanedData.csv")
+```
+
+```{r}
+names(df2)
+```
+Before diving into building our model, it is a good practice to search for any possible correlations between independent variables as the presence of two highly correlated independent variables in a model can cause multicollinearity which is a adverse outcome for us as analysts.
+```{r}
+data = data.frame(year=df2$year, condition=as.numeric(factor(df2$condition)), cylinders=as.numeric(factor(df2$cylinders)), fuel=as.numeric(factor(df2$fuel)), odometer=df2$odometer, title_status=as.numeric(factor(df2$title_status)), transmission=as.numeric(factor(df2$transmission)), drive=as.numeric(factor(df2$drive)), type=as.numeric(factor(df2$type)), paint_color=as.numeric(factor(df2$paint_color)), state=as.numeric(factor(df2$state)))
+
+corr = cor(data)
+corr %>% ggcorrplot(lab=TRUE, colors = c("blue","white","red"))
+```
+As can be seen there is a high correlation between "odometer" and "year" which makes sense as the age of a car goes up, the probability that the car has run more miles also increases. We need to eliminate one of them to eschew multicollinearity.
+We decided to eliminate "year" as we believe "odometer" is a better predictor.
+```{r}
+df3 = df2[,-2]
+summary(df3)
+```
+In the process of building models we start by creating a group of models and assessing them mainly based on MRSE. However, there is a possibility that just by splitting data set into train and test, we end up having a test data set which contains a lot of outliers. As a result, we compare the result of our two best models using cross validation.
+In the first step, we build model based on train, test them on test data set, and compare them using residual analysis and RMSE.
+
+```{r}
+set.seed(123)
+training_sample = df3$price %>% createDataPartition(p=0.8, list=FALSE)
+
+train = df3[training_sample, ]
+test = df3[-training_sample, ]
+```
+
+We start with creating a regression model which contains all of the variables that we think have a correlation with price of a car.
+```{r}
+model1 = lm(log(price) ~ factor(manufacturer) +factor(condition) + factor(cylinders) + factor(fuel) + odometer + factor(title_status) + factor(transmission) + factor(drive) + factor(type) + factor(paint_color) + factor(state) +factor(manufacturer), train)
+```
+
+```{r}
+summary(model1)$r.squared
+test1 = test
+test1$pred = predict(model1, test1)
+test1$pred = exp(test1$pred)
+RMSE(test1$pred, test1$price)
+AIC(model1)
+```
+In this step, we use the "stepwise" command to simplify and decrease the number of predictors. The alternative method is "lasso" which will be used in following.
+```{r}
+stepwise(model1, direction = 'forward/backward', criterion = 'AIC')
+```
+We build the regression mode2 based on the result of running "stepwise" command on "model1".
+```{r}
+model2 = lm(log(price) ~ factor(manufacturer) +factor(condition) + factor(cylinders) + factor(fuel) + odometer + factor(title_status) + factor(drive) + factor(type) + factor(paint_color) + factor(state) , train)
+```
+
+```{r}
+test2=test
+test2$pred = predict(model2, test2)
+test2$pred=exp(test2$pred)
+RMSE(test2$price, test2$pred)
+AIC(model2)
+summary(model2)$r.squared
+```
+
+What about their residual?
+```{r}
+model1.res = resid(model1)
+hist(model1.res)
+test1 %>% ggplot(aes(x=log(pred), y=log(price))) + geom_point() + ylim(6,12) + xlim(6,12)
+```
+This shows that model1 tends to overestimate price of cars. 
+
+```{r}
+model2.res = resid(model2)
+hist(model2.res)
+test2 %>% ggplot(aes(x=log(pred), y=log(price))) + geom_point() +xlim(6,12) + ylim(6,12)
+```
+The main problem of our model is related to the cases where the actual price is relatively low, but our model predicts those prices higher.
+As the AIC, R-squared, and accuracy of model1 and model2 are almost the same, based on Occam's razor law, we prefer model2 as it is simpler. In other words, we eliminated independent variables that don't bear enough predictive power to justify complicating the model.
+In this step, we have decided to use Lasso to choose among predictor variables that we have. 
+```{r}
+x_vars = model.matrix(log(price) ~ manufacturer +condition + cylinders + fuel + odometer + title_status + transmission + drive + type + paint_color + state +manufacturer, data = df3)[,-1]
+y_vars = df3$price 
+
+set.seed(86)
+train_lasso = sample(1:nrow(x_vars), 0.8 * nrow(x_vars))
+x_test = (-train_lasso)
+y_test = y_vars[x_test]
+cv_output = cv.glmnet(x_vars[train_lasso,], y_vars[train_lasso])
+best_lam = cv_output$lambda.min
+lasso_best = glmnet(x_vars[train_lasso,], y_vars[train_lasso], lambda = best_lam)
+coef(lasso_best)
+```
+At this stage, we run a random forest algorithm based on model2 to see if we can improve the predictive power of model2.
+```{r}
+RandFor1 = randomForest(log(price) ~ manufacturer +condition + cylinders + fuel + odometer + title_status + drive + type + paint_color + state , data = train)
+
+test3 = test
+test3$pred = predict(RandFor1, test3)
+test3$pred = exp(test3$pred)
+RMSE(test3$price, test3$pred)
+```
+
+```{r}
+test3 %>% ggplot(aes(x=log(pred), y=log(price))) + geom_point() +xlim(6,12) + ylim(6,12)
+```
+The accuracy power of the model increased dramatically as the RMSE decreased by almost 20%.
+We will adjust some of the parameters of RandFor1 model to reach a better model.
+```{r}
+RandFor2 = randomForest(price ~ manufacturer +condition + cylinders + fuel + odometer + title_status + drive + type + paint_color + state , data = train, nodsize = 11, ntree=500, mtry=5)
+
+test4 = test
+test4$pred = predict(RandFor2, test4)
+RMSE(test4$price, test4$pred)
+```
+```{r}
+test4 %>% ggplot(aes(x=log(pred), y=log(price))) + geom_point() +xlim(6,12) + ylim(6,12)
+```
+
+```{r}
+RandFor3 = randomForest(price ~ manufacturer +condition + cylinders + fuel + odometer + title_status + drive + type + paint_color + state , data = train, nodsize = 5, ntree=2000, mtry=8)
+
+test5 = test
+test5$pred = predict(RandFor3, test5)
+RMSE(test5$price, test5$pred)
+```
+As mentioned earlier, to be more confident about the result of our model, we should conduct the cross validation algorithm on models that we think that are likely to be the most predictive models. The models that are chosen are Model2, RandFor1, and RandFor2.
+Here, we will see the result of 10-fold cross validation on model2 which is a linear regression model.
+```{r}
+myControl = trainControl(method = "cv", number = 10, verboseIter = FALSE)
+LRModel2 = train(log(price) ~ factor(manufacturer) +factor(condition) + factor(cylinders) + factor(fuel) + odometer + factor(title_status) + factor(drive) + factor(type) + factor(paint_color) + factor(state), 
+              data = df3,
+              metric='RMSE',
+              method = "lm",
+              trControl = myControl)
+LRModel2
+```
+```{r}
+RFModel1 = train(log(price) ~ manufacturer +condition + cylinders + fuel + odometer + title_status + drive + type + paint_color + state, 
+              data = df3,
+              metric='RMSE',
+              tuneLength = 1,
+              method = "ranger",
+              importance = 'impurity',
+              trControl = myControl)
+RFModel1
+```
+
+```{r}
+RFModel2 = train(price ~ manufacturer +condition + cylinders + fuel + odometer + title_status + drive + type + paint_color + state, 
+              data = df3,
+              metric='RMSE',
+              tuneLength = 1,
+              method = "ranger",
+              importance = 'impurity',
+              trControl = myControl)
+RFModel2
+```
+```{r}
+model_list = list(lm = LRModel2, rf1 = RFModel1)
+resample = resamples(model_list)
+summary(resample)
+```
+```{r}
+bwplot(resample, metric="RMSE")
+```
+```{r}
+bwplot(resample, metric="Rsquared")
+```
+By comparing both metrics, we noticed that our Random Forest model outperforms linear model considerably. As a result, we believe that random forest yields better result if adopted by a company to predict the price of cars.
+Another point that can be used is to see the difference between different states and whether these differences are significant or not.
+```{r}
+statInsight= data.frame(summary(model2)$coefficients)
+```
+```{r}
+statInsight = statInsight[,c(1,4)]
+```
+```{r}
+statInsight = statInsight[54:103,]
+```
+```{r}
+dim(statInsight %>% filter(Pr...t..>0.05))
+```
+Among 50 states, 16 of them are insignificant in terms of difference between prices. However we should have the baseline state and add that also and consider the coefficient of zero for that.
+```{r}
+states <- read.csv("~/Courses/Fall 1 Duke/Data science for business/Team project/states.csv")
+```
+```{r}
+sample_n(states %>% filter(Pr...t..<0.05),10) %>% ggplot(aes(x=X, y=Estimate))+geom_point() + theme(legend.position = "none", axis.text.x = element_text(angle = 60))
+
+```
+As can be seen, by controlling for all other variables, we can see that a car can be sold with higher or lower price in different states. It may be a window to buy a specific car in a state and sell it in another state.
+Furthermore, we also plotted the data on a heat map to show where the market is booming and where the market is dull.
+```{r}
+library(leaflet)
+library(leaflet.extras)
+max_value = max(df3$price)
+leaflet_map <- leaflet(data = df3, options = leafletOptions(minZoom =0, maxZoom = 15)) %>%
+  addTiles() %>% setView(lng = -73.98, lat= 40.738, zoom = 13) %>%
+  addHeatmap(lng = ~long, lat = ~lat, intensity = ~price, minOpacity=0.2, max=max_value, radius=6, blur=7)
+leaflet_map
+```
+
+
+
