@@ -1,0 +1,179 @@
+---
+title: "Bike Sharing Dataset Analysis"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(olsrr)
+library(leaps)
+library(ggpubr)
+library(car)
+```
+
+# Proposal
+There are a variety of business problems that this dataset can help solve. As bikes need maintenance every now and then, an analysis of this dataset can tell the company when the best times are to perform maintenance on the bikes. Furthermore, we can analyze when prices should be higher due to high volume at particular times and days. Finally, upon analyzing the weather of a given day, we can predict the amount of bikes needed and either add or remove bikes accordingly. All of these problems can be analyzed in total and splitting registered users and casual users and evaluating both cases separately. The dataset we will be using is the Bike Sharing in Washington dataset from Kaggle. This dataset allows us to see how many bikes are rented at any given time and day according to weather conditions and if a user is registered or casual. A feature that would be useful is creating a model that can predict the number of users on a day according to the weather conditions. We hope to achieve this through supervised training as the count for each hour is already given in the dataset. This would add value to the business as it can help optimize profits by price surging, adding and removing bikes due to demand, and optimizing maintenance times. 
+
+# Data Description
+The dataset include year 2011 and 2012 bike rentals' information collected by Capital Bikeshare System, a system where the whole process from membership, rental and return is automatic. This dataset contains 17379 observations with each observation corresponding to one particular hour. It includes 17 variables: instant, dteday, season, yr, mnth, hr, holiday, weekday, workingday, weathersit, temp, atemp, hum, windspeed, casual, registered, and cnt. Out task is to find the best regression model for predicting total number of bikes rented in a particular
+hour (variable cnt) using environmental conditions and other available explanatory variables. 
+
+# Exploratory Data Analysis
+```{r, include=FALSE, echo=FALSE}
+bike = read.csv('hour.csv')
+```
+
+```{r, echo = FALSE, include=FALSE}
+levels(bike$season) = c("Spring","Summer","Fall","Winter")
+levels(bike$workingday) = c("No", "Yes")
+levels(bike$weathersit) = c("Clear", "Mist", "Light Snow", "Heavy Rain")
+bike = bike %>% dplyr::select(-instant,-dteday, -casual, -registered)
+```
+
+```{r, echo=FALSE, fig.height=3}
+cat <- c('season', 'mnth', 'hr', 'holiday', 'weekday', 'workingday', 'weathersit') 
+cont <- c('temp', 'atemp', 'hum', 'windspeed')
+# convert all categorical variables to factors
+bike[cat] <- lapply(bike[cat], as.factor)
+# histogram of cnt
+hist(bike$cnt, main = "Histogram of log cnt")
+```
+
+The distribution of the Cnt variable is highly right skewed and asymmetrical. From 0-25 there are over 3000 instances and for count over 500 there are significantly lower instances. It is not surprising that the histogram is right skewed because it is rare for people to use over 500 bikes in a given time period. We need to transform our dataset into a normal distribution for further statistical inference. To deal with this right skewed data, we will use log(price) instead of price to minimize the negative effects of skewed data.
+
+```{r, echo=FALSE, fig.height = 3}
+# correlation matrix
+cormat <- round(cor(bike[c(cont, 'cnt')]), 2) 
+melted_cormat <- melt(cormat) 
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile() + geom_text(aes(label = value), color = 'white', size = 5)
+```
+
+Through exploring the correlation between different variables, we made a heatmap that shows all correlation values exist among different numeric variables. The strongest correlation exists between humidity and cnt(-0.32). As the humidity goes up, the cnt value goes down. It means that people may rent bikes less frequently on foggy and rainy days. There is a high correlation between feeling temperature and temperature(0.99). Including both atemp and temp is redundant. We remove atemp to avoid collinearity, thus generating a more accurate linear regression model in further steps.
+
+```{r, echo=FALSE}
+par(mfrow = c(2, 3))
+boxplot(log(bike$cnt) ~ season, data = bike)
+boxplot(log(bike$cnt) ~ mnth, data = bike)
+boxplot(log(bike$cnt) ~ hr, data = bike)
+boxplot(log(bike$cnt) ~ holiday, data = bike)
+boxplot(log(bike$cnt) ~ workingday, data = bike)
+boxplot(log(bike$cnt) ~ weathersit, data = bike)
+```
+
+From the season plot, People rent more bikes in Fall and less in Spring. From January to June, cnt increases continuously. From July to December, cnt decreases at a smoother speed. Holiday: People tend to rent bikes less during holidays. In terms of workingday, it’s a binary variable with 0 meaning not a workday, and 1 as holiday or weekend. The weathersit data is coded with 1 as the best weather and 4 as the worst weather condition. It is not surprising that there are less people riding the bike on a bad weather day than on a Sunny day. The relationship between hour and cnt is non-linear. From 4:00am to 8:00am, the number of bike rentals increased significantly. Highest amount of bike rental is between 7 - 8am and 5 - 6pm, and this may be due to daily commute of people in DC.
+
+## Interaction Effects
+```{r}
+ggplot(bike) +
+geom_boxplot(aes(x = hr, y = cnt, color = as.factor(workingday))) + theme_minimal() +
+labs(x ="Hour", y = "Number of Bike Rentals",title = "Daily Trends in Rider Count")
+```
+
+```{r}
+g1 <- ggplot(bike, aes(x = temp, y = cnt, color = mnth)) +
+geom_smooth(fill = NA, size = 1, method = 'gam', formula = y ~ s(x, bs = "cs")) + xlab("Temperature") +
+ylab("Number of Bike Rentals") 
+
+g2 <- ggplot(bike, aes(x = hum, y = cnt, color = mnth)) +
+geom_smooth(fill = NA, size = 1, method = 'gam', formula = y ~ s(x, bs = "cs")) + xlab("Humidity") +
+ylab("Number of Bike Rentals") 
+
+ggarrange(g1, g2, ncol = 2, nrow = 1)
+```
+
+# Model Selection
+
+```{r}
+bike["hr_workingday"] = bike["hr"] * bike["workingday"]
+bike["mnth_temp"] = bike["mnth"] * bike["temp"]
+bike["mnth_hum"] = bike["mnth"] * bike["hum"]
+col <- c('season', 'yr', 'mnth', 'hr', 'holiday', 'workingday', 'weathersit','temp', 'windspeed', 'hum', 'cnt', "hr_workingday", "mnth_temp", "mnth_hum")
+sam_size <- floor(0.80 * nrow(bike))
+train_ind <- sample(seq_len(nrow(bike)), size = sam_size) # training data
+train <- bike[train_ind, col]
+test <- bike[-train_ind, col]
+```
+
+
+```{r}
+model1 <- lm(cnt ~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season, data = train)
+vif(model1)
+c(adjusted.R.squared = summary(model1)$adj.r.squared)
+par(mfrow = c(2, 2))
+plot(model1)
+```
+
+```{r}
+model2 <- lm(log(cnt) ~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season, data = train)
+c(adjusted.R.squared = summary(model1)$adj.r.squared)
+par(mfrow = c(2, 2))
+plot(model1)
+```
+
+
+```{r}
+regfit <- regsubsets(cnt ~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season + hr*workingday + mnth*temp + mnth*hum, data = train, nvmax = 10, method = "forward")
+
+regfit_summary <- summary(regfit)
+
+#Forward adjusted R^2
+adjr2_forward <- regfit_summary$which[which.max(regfit_summary$adjr2),]
+#Forward AIC
+aic_forward <- regfit_summary$which[which.max(regfit_summary$aic),]
+#Forward BIC 
+bic_forward <- regfit_summary$which[which.min(regfit_summary$bic),]
+#Mallow's Cp
+mallows_forward <- regfit_summary$which[which.min(regfit_summary$cp),]
+```
+
+```{r}
+set.seed(123)
+
+cv_adjr2 <- cv.lm(lm(cnt ~  mnth + hr + holiday + workingday + temp + hum  + season + hr:workingday + mnth:temp + mnth:hum, y = TRUE, x = TRUE, data = train), k = 5)
+
+cv_aic <- cv.lm(lm(cnt ~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season + hr*workingday + mnth*temp + mnth*hum, y = TRUE, x = TRUE, data = train), k = 5)
+
+cv_bic <- cv.lm(lm(cnt ~ mnth + hr + holiday + workingday + temp + hum + season + hr*workingday + mnth*hum, y = TRUE, x = TRUE, data = train), k = 5)
+
+cv_cp <- cv.lm(lm(cnt ~ mnth + hr + holiday + workingday + temp + hum + season + hr*workingday + mnth*temp + mnth*hum, y = TRUE, x = TRUE, train), k = 5)
+
+cross_val_results <- c(cv_adjr2$MSE_sqrt$mean, cv_aic$MSE_sqrt$mean, cv_bic$MSE_sqrt$mean, cv_cp$MSE_sqrt$mean)
+
+results <- data.frame("Name" = c("forward adjusted R^2","Forward AIC","Forward BIC","Mallow's Cp"), "Value" = c( cv_adjr2$MSE_sqrt$mean, cv_aic$MSE_sqrt$mean, cv_bic$MSE_sqrt$mean, cv_cp$MSE_sqrt$mean))
+```
+
+```{r}
+results
+```
+
+```{r}
+par(mfrow = c(2, 2))
+model2 = lm(cnt~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season + mnth:temp + mnth:hum + hr:workingday, data = train)
+plot(model2)
+summary(model2)
+```
+
+```{r}
+#standardie the data
+X <- model.matrix(cnt ~ mnth + hr + holiday + workingday + weathersit + temp + hum + windspeed + season, train)[,-1]
+y <- train$cnt
+
+#ols model for comparison
+ols.mod <- lm(y ~ X)
+
+#grid of possible lambda values
+lambda.grid <- 10^seq(10,-2,length=100)
+#alpha = 0 corresponds to ridge regression
+
+ridge.mod <- glmnet(y = y, x = X, alpha = 0, lambda = lambda.grid)
+
+dim(coef(ridge.mod))
+```
+
+
