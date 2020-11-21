@@ -1,0 +1,339 @@
+---
+title: "Individual Assignment:Explore students behavior and understand their lifestyles "
+author: "Shimin Yu"
+header-includes:
+    - \usepackage{setspace}\doublespacing
+output:
+  pdf_document: default
+  html_document: default
+  fontsize: 12pt
+  geometry: margin=1 in
+---
+
+```{r setup, include=FALSE,cache = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(MASS)
+library(dummies)
+library(fastDummies)
+library(caret)
+library(randomForest, quietly = TRUE)
+library(Hmisc, quietly = TRUE)
+library(ggpubr)
+library(Metrics, quietly = TRUE)
+library(glmnet, quietly = TRUE)
+library(rpart)
+library(rpart.plot)
+```
+## Introduction
+
+**Business Context.**
+
+Students’ academic performance depends on multiple variables. From leisure activities to working style, family education and emotional status. It is not only important to find ways to improve students' grades, but also important to find out critical factors that influence their lifestyles. Both mental health and physical health need attention and this assignment is aimed to explore more on these variables. 
+
+For this assignment, I focus on two main problems reflected from the datasets. The first one is to discover what factors relate to the amount of weekly alcohol consumption. This can help us to determine the most significant reason for students to drink: family, study pressure, or peer pressure? The second problem I focus on is the factors that determine the final grade(G3). Combining these two areas together, we could generate a more broad and exclusive view towards behavior of students  and understand more about their lifestyles, therefore help them in related areas.
+
+The model I built on this dataset should help determine the major factors that influence the overdose of a student's alcohol consumption and the most significant factors relate to the final grades. It should be useful when applied to students’ social behavior and understand their daily behaviors. 
+
+Data Source: https://www.kaggle.com/uciml/student-alcohol-consumption 
+
+
+**Dataset Introduction.**
+
+For this individual assignment, I am going to explore the student alcohol consumption datasets. This is a very interesting dataset that include multiple variables: school, sex, age, address, family size, parents cohabitation status, parents’ education level, etc. The alcohol consumption differs from weekend to weekdays consumption. Students' grades(math and portuguese) varies by different periods of time. 
+
+Model 1: (Numerical Model)
+Dependent Variable: Final Grade
+Independent Variables: sex, age, famsize, medu, fedu, mjob, fjob, studytime, failures, schoolsup, paid, nursery, higher, internet, romantic, famrel, freetime, Dalc(workday alcohol consumption), Walc, absenses
+
+Model 2: 
+Dependent Variable: Weekly Alcohol Consumption
+Independent Variables: sex, age, famsize, medu, fedu, mjob, fjob, studytime, failures, schoolsup, paid, nursery, higher, internet, romantic, famrel, freetime, Dalc(workday alcohol consumption), absenses, G3(final grade).
+
+Checking different variables to find the correlation between them. Explore multiple relationships such as gender and final grade; family education and alcohol consumption. It contains lots of information to be explored in further details.
+
+
+
+## Data Preparation
+
+The first step is to prepare the dataset for further modelling. So I checked the null value in this dataset and it turns out there is no missing value in this dataset. There is no need for replacing missing value with mean value. Among all dependent variables, there are categorical variables with over 2 levels and continuous variables. I factor those categorical variables so the machine could realize them as categorical values rather than treat them as numerical factors. Then I removed Dalc(daily alcohol consumption) because Walc = Dalc x 7 directly and cannot be counted as a valid dependent variable. G1(first-period grade) and G2(second-period grade) also are removed from the independent variables because these two directly correlate to dependent variable G3(final grade) and negatively affect the accuracy of the final model. 
+
+I do not remove much outliers  from this dataset because I do want to explore students behavior more exclusively, especially focus on those who skip lots of classes or did exceptionally well in taking exams. However, while visualizing data, I do remove some outliers so the relationship between two variables could be seen more straightforward.
+
+
+```{r,echo=FALSE,include=F}
+df <- read.csv('/Users/shiminyu/Desktop/archive (8)/student-mat.csv')
+head(df)
+colnames(df)
+```
+
+```{r,echo=F}
+# Clean Data
+cols <- c("school", "sex","address", "famsize", "Pstatus","Medu","Fedu","Mjob","Fjob",
+          "reason","guardian","schoolsup","famsup","paid","activities",
+          "nursery","higher","internet","romantic","health")
+df[cols] <- lapply(df[cols], as.factor)
+
+df2 <- within(df, rm(Dalc, G1,G2))
+df1 <- within(df, rm(Dalc))
+df2 <- df[df$absences < 20,]
+```
+
+## Including Plots
+
+The first two boxplots explore the relationship between weekly alcohol consumption and social behavior/absences. So I use boxplots to see its relationship. (remove outliers with absences over 20)
+
+
+```{r, echo=FALSE,warning=F}
+
+ga <- df2 %>% ggplot(aes(factor(Walc), goout)) + geom_boxplot() + theme(legend.position = "none")
+gb <- df2 %>% ggplot(aes(factor(Walc), absences)) + geom_boxplot() + theme(legend.position = "none")
+
+ggarrange(ga,gb,ncol = 2)
+```
+
+These two boxplots explore the relationship between workday alcohol consumption and final grade, we can see that workday and weekend alcohol consumption highly correlate. Though not very much, students who have least alcohol consumption during workday and weekend have higher final grades in general.
+
+```{r,echo=FALSE,warning=F}
+# workday 
+g1 <- df %>% ggplot(aes(x=factor(Dalc),y=log(G3),fill=factor(Dalc)))+geom_boxplot()+theme(legend.position='none')+xlab('workday alcohol consumption')+ylab('final grade')+ggtitle('Final Grade Vs Workday Alcohol Consumption')
+
+# weekend
+g2 <- df %>% ggplot(aes(x=factor(Walc),y=log(G3),fill=factor(Walc)))+geom_boxplot()+theme(legend.position='none')+xlab('Weekend alcohol consumption')+ylab('final grade')+ggtitle('Final Grade Vs Weekend Alcohol Consumption')
+
+ggarrange(g1,g2,ncol = 2)
+```
+## Data Interaction Vs Dependent Variable
+
+These two plots explore multiple variables and interaction among different variables. 
+
+```{r,echo=F,fig.height=5}
+g3 <- df %>% ggplot(aes(x=factor(age),y=G3,fill=factor(sex)))+geom_boxplot()+theme(legend.position=c(0.8, 0.2))+xlab('Age Group')+ylab('final grade')+ggtitle('Age vs Alcohol Consumption')
+
+g4 <- df %>% ggplot(aes(x=higher,y=Walc,fill=factor(sex)))+geom_boxplot()+theme(legend.position=c(0.8, 0.2))+xlab('Age Group/Higher Education')+ylab('final grade')+ggtitle('Age/Higher Education vs Alcohol Consumption')
+
+ggarrange(g3,g4,ncol = 2)
+```
+From this corrplot, we can directly view correlation between different variables. Go out and Walc is highly correlated. Also, failues and grades are negatively correlated. G1 G2 G3 are also highly correlated with each other. This make sense because we always assunme people who good at taking exams will keep high grades as they ususally did.
+```{r,echo=F,fig.height=3}
+df_num <- dplyr::select_if(df, is.numeric)
+df <- cor(df_num,method = 'pearson')
+corrplot(df, order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+```
+
+```{r,warning=F,results="hide",echo=F,fig.height=3}
+# Train_test Split
+set.seed(123) 
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(df1))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(df1)), size = smp_size)
+
+train <- df1[train_ind, ]
+test <- df1[-train_ind, ]
+
+
+model <- lm(G3~.+sex*romantic ,train)
+summary(model)$r.squared
+test$pred <- predict(model,test)
+RMSE(test$pred,test$G3)
+AIC(model)
+res = resid(model)
+hist(res)
+
+Model_results <- c(summary(model)$r.squared,AIC(model), RMSE(test$pred,test$G3),MAE(test$pred,test$G3))
+
+Model_results <- data.frame("Name" = c("R_Squared","AIC of model","RMSE of model","MAE of model"), "Value" = Model_results)
+
+step <- stepAIC(model, direction = "both", 
+                      trace = FALSE,criterion = 'AIC')
+AIC(step)
+summary(step)$r.squared
+test2=test
+test2$step_pred <-predict(step,test2)
+RMSE(test2$step_pred,test$G3)
+
+step_results <- c(summary(step)$r.squared,AIC(step), RMSE(test2$step_pred,test$G3),MAE(test2$pred,test$G3))
+
+step_results <- data.frame("Name" = c("R_Squared","AIC of model","RMSE of model","MAE of model"), "Value" = step_results)
+
+
+```
+Plot Residual Vs Fitted
+```{r,echo=F}
+# plot residual vs Fitted
+par(mfrow=c(2,2))
+plot(model,which=1)
+plot(model,which=2)
+plot(step,which=1)
+plot(step,which=2)
+```
+
+## Modelling
+
+I splited train and test by 0.75 partitioning, applied two models to this datastes, the first one is the linear regression model with full components(except for Dalc because this directly calculate the Wacl). Checking the performance of the first model, the R squared is  0.8548685, then apply the model to test data, showing 1.87 RMSE and 1231 AIC value. 
+
+To streamline the process, I use stepwise to build step model and check the performance of the model. AIC of test dataset reduced to 1183, suggesting it inclined less towards overfitting and RMSE reduced to 1.71.R squared changed to 0.8397, which is slightly smaller than full model. Considering overfitting problem, I choose stepwise model for further application.
+
+To see the residuals and fitted values more straightforward. I drawed two sets of residuals VS fitted and normal Q-Q plot. The line in normal Q_Q plots indicated that the data normally distributed with light tails on one end. The residuas spread across the horizontal lines. Both graphs show good linearlity in both models. 
+
+Random Forest is used as another way to check performance our predictiing model as a comparison.the RMSE dramatically increases, indicating that the predicted accuracy dropped a lot. Therefore, I will continue with linear regression model. To balance accuracy and variation of the applied model, I use cross validation in the following step.
+
+```{r,echo=F,results="hide"}
+Model_results <- c(summary(model)$r.squared,AIC(model), RMSE(test$pred,test$G3),MAE(test$pred,test$G3))
+
+Model_results <- data.frame("Name" = c("R_Squared","AIC of model","RMSE of model","MAE of model"), "Value" = Model_results)
+
+step_results <- c(summary(step)$r.squared,AIC(step), RMSE(test2$step_pred,test$G3),MAE(test2$pred,test$G3))
+
+step_results <- data.frame("Name" = c("R_Squared","AIC of model","RMSE of model","MAE of model"), "Value" = step_results)
+
+```
+
+Original Model Result:
+```{r,echo=F}
+Model_results
+```
+
+Stepwise Model Result:
+```{r,echo=F}
+step_results
+```
+
+```{r,results="hide",echo=F}
+# Define training control
+set.seed(123) 
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+
+cvmodel <- train(G3 ~., data = train, method = "lm",
+               trControl = train.control)
+# Summarize the results
+summary(cvmodel)$r.squared
+test$cvpred <- predict(cvmodel,test)
+RMSE(test$cvpred,test$G3)
+
+cross_val_results <- c(summary(cvmodel)$r.squared, RMSE(test$cvpred,test$G3),MAE(test$cvpred,test$G3))
+
+results <- data.frame("Name" = c("forward adjusted R^2","RMSE of model","MAE of model"), "Value" = cross_val_results)
+
+# repeated cross_validation
+train.control <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 3)
+# Train the model
+model3 <- train(Walc ~., data = df1, method = "lm",
+               trControl = train.control)
+# Summarize the results
+summary(model3)$r.squared
+test3=test
+m3pred <- predict(model3,test3)
+RMSE(m3pred,test$G3)
+
+```
+
+Cross_validation Model Result:
+```{r,echo=F,warning=F}
+cross_val_results <- c(summary(cvmodel)$r.squared, RMSE(test$cvpred,test$G3),MAE(test$cvpred,test$G3))
+
+cross_val_results <- data.frame("Name" = c("forward adjusted R^2","RMSE of model","MAE of model"), "Value" = cross_val_results)
+cross_val_results
+```
+
+## Model Interpretation
+
+In the stepwise model, significant factors relate to final grades are selected:
+age, failures, famrel, absences, G2. While age increases with one unit, final grade decreased by 0.23 times age; As failures increase by 1, final grade decreases by 0.42, family relationship also influence final grade as the coefficient is 0.30. It is no suprise that G1 and G2 relate high to final model, because these two indicates grades in previous period.
+
+In the second model for predicting weekly alcohol consumption, I drawn a decision tree and this indicates that goout, sex, familyjob and final grade are necessary components that influence amount of alcolhol consumption. Following the branches of decision tree, cut off line as goout > 4, studytime>=2 and parents' job categories affect goout and thus final dependent variable.Based on the cross validation, the result is almost the same with the previous model, validating that previous model well-balanced between variation and accuracy.So the model is good for applying to test site and new datasets. 
+
+Checking the important factors in random forests, we can see a similar pattern derived from decision tree. Top 5 important factor correlates most to variation of alcohol assumption are goout, final grade, studytime and traveltime.
+
+
+```{r,warning=F}
+RFmodel = randomForest(G3 ~ . , data = train, nodsize = 5, ntree=2000, mtry=8)
+
+test3 = test
+test3$pred = predict(RFmodel, test3)
+RMSE(test2$Walc, test2$pred)
+```
+
+```{r,echo=F,fig.height=3}
+tree <- rpart(formula = Walc ~ ., method='class',data=train,minsplit=20,minbucket=20,parms = list(split='information'))
+prp(tree)
+rf_model <- randomForest(Walc~., data = train, ntree = 10,importance=T)
+
+```
+
+```{r,warning=F,echo=F,results="hide"}
+# Define training control
+set.seed(123) 
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+
+cvmodel <- train(G3 ~., data = train, method = "lm",
+               trControl = train.control)
+# Summarize the results
+summary(cvmodel)$r.squared
+test$cvpred <- predict(cvmodel,test)
+RMSE(test$cvpred,test$G3)
+
+cross_val_results <- c(summary(cvmodel)$r.squared, RMSE(test$cvpred,test$G3),MAE(test$cvpred,test$G3))
+
+results <- data.frame("Name" = c("forward adjusted R^2","RMSE of model","MAE of model"), "Value" = cross_val_results)
+
+# repeated cross_validation
+train.control <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 3)
+# Train the model
+model3 <- train(Walc ~., data = df1, method = "lm",
+               trControl = train.control)
+# Summarize the results
+summary(model3)$r.squared
+test3=test
+m3pred <- predict(model3,test3)
+RMSE(m3pred,test$G3)
+
+
+```
+## Deployment
+
+Two models are generated from this model, the first one show factors relate to good grades; the second one show factors lead to weekly alcolhol consumption. The model could be deployed in the following ways:
+
+Education institution could use model to determine the estimated grades of individual students and make objective based on needs of each individual. Therefore, their personal needs are taken care and estimated goal for students are more reachable and less stressful. School could analyze students' behavior from multiple aspects, asking for help from their parents by pointing out the exact factor that leads to its failure in academic, thus improving their grades while incorporating necessary factors.
+
+Psychology Research Center could use model to study behavioral science of students. From decision tree and random forest model, how different factors determine final prediction for alcohol comsumption could be viewed more clearly. This is important, especially to study underage drinking. the results could be used as a way to balance its academic performance and social activities, family relationship and mental health of teenagers. 
+
+Both ideas are critical for improving students' mental health and improve their academic performance, which is super useful for improving education quality.
+
+
+
+\newpage
+## Apendix
+
+Random Forest Important Factors
+
+```{r,echo=F,warning=F}
+tree <- rpart(formula = Walc ~ ., method='class',data=train,minsplit=20,minbucket=20,parms = list(split='information'))
+rf_model <- randomForest(Walc~., data = train, ntree = 10,importance=T)
+rf_model$importance
+```
+
+Summary of Step Model
+
+```{r,echo=F}
+summary(step)
+```
+
+
+
+
+
