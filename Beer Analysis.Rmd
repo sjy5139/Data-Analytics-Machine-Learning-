@@ -1,0 +1,335 @@
+---
+title: "Beer Data"
+author: "Shimin"
+date: "2/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+library(corrplot)
+library(tidyverse)
+library(olsrr)
+library(randomForest)
+library(states)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+state <- read.csv('/Users/shiminyu/Desktop/Peltast Partners/beer_states.csv')
+tax <- read.csv('/Users/shiminyu/Desktop/Peltast Partners/beer_taxed.csv')
+brew <- read.csv('/Users/shiminyu/Desktop/Peltast Partners/brewer_size.csv')
+material <- read.csv('/Users/shiminyu/Desktop/Peltast Partners/brewing_materials.csv')
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+head(state)
+head(tax)
+head(brew)
+head(material)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+state <- na.omit(state)
+tax <- na.omit(tax)
+brew <- na.omit(brew)
+unique(brew$brewer_size)
+brew <- brew[brew$brewer_size != 'Total',]
+state <- state[state$state != 'total',]
+quantile(brew$total_barrels,c(0.2,0.4,0.6,0.8,1))
+unique(brew$brewer_size)
+
+bsize <- NULL
+for (i in 1:nrow(brew)){
+  if (brew[i,"total_barrels"] < 1000000 ){
+    bsize = c(bsize, "< 1M")
+}else if(brew[i,"total_barrels"] < 2000000 ){
+   bsize = c(bsize, "< 2M")
+}else if(brew[i,"total_barrels"] < 5000000 ){
+   bsize = c(bsize, "< 5M")
+}else if(brew[i,"total_barrels"] < 10000000 ){
+   bsize = c(bsize, "< 10M")
+}else{bsize = c(bsize, "> 10M")}
+}
+bsize
+
+```
+Let's Check the trend of taxable removal and total barrels of brewers from 2009 to 2019.
+```{r}
+df1 <- brew[brew$brewer_size == '1,001 to 7,500 Barrels',]
+df9 <- brew[brew$brewer_size == '1 to 1,000 Barrels',]
+p9 <- ggplot(df9) + 
+  geom_line(aes(x=df9$year,y=df9$total_barrels,color='total')) + 
+  geom_line(aes(x=df9$year,y=df9$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df9$year), breaks = df9$year) +
+  labs(x ="Year", y = "Total Barrels",title = "1 to 1,000 Barrels")
+
+df8 <- brew[brew$brewer_size == '7,501 to 15,000 Barrels',]
+p8 <- ggplot(df8) + 
+  geom_line(aes(x=df8$year,y=df8$total_barrels,color='total')) + 
+  geom_line(aes(x=df8$year,y=df8$taxable_removals,color='tax free')) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df8$year), breaks = df8$year) +
+  labs(x ="Year", y = "Total Barrels",title = "7,501 to 15,000 Barrels")
+
+df7 <- brew[brew$brewer_size == '15,001 to 30,000 Barrels',]
+p7 <- ggplot(df7) + 
+  geom_line(aes(x=df7$year,y=df7$total_barrels,color='total')) + 
+  geom_line(aes(x=df7$year,y=df7$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df7$year), breaks = df7$year) +
+  labs(x ="Year", y = "Total Barrels",title = "15,001 to 30,000 Barrels")
+
+df6 <- brew[brew$brewer_size == '30,001 to 60,000 Barrels',]
+p6 <- ggplot(df6) + 
+  geom_line(aes(x=df6$year,y=df6$total_barrels,color='total')) + 
+  geom_line(aes(x=df6$year,y=df6$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df6$year), breaks = df6$year) +
+  labs(x ="Year", y = "Total Barrels",title = "30,001 to 60,000 Barrels")
+
+df5 <- brew[brew$brewer_size == '60,001 to 100,000 Barrels',]
+p5 <- ggplot(df5) + 
+  geom_line(aes(x=df5$year,y=df5$total_barrels,color='total')) + 
+  geom_line(aes(x=df5$year,y=df5$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df5$year), breaks = df5$year) +
+  labs(x ="Year", y = "Total Barrels",title = "60,001 to 100,000 Barrels")
+
+df4 <- brew[brew$brewer_size == '100,001 to 500,000 Barrels',]
+p4 <- ggplot(df4) + 
+  geom_line(aes(x=df4$year,y=df4$total_barrels,color='total')) + 
+  geom_line(aes(x=df4$year,y=df4$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df4$year), breaks = df4$year) +
+  labs(x ="Year", y = "Total Barrels",title = "100,001 to 500,000 Barrels")
+
+df3 <- brew[brew$brewer_size == '500,001 to 1,000,000 Barrels',]
+p3 <- ggplot(df3) + 
+  geom_line(aes(x=df3$year,y=df3$total_barrels,color='total')) + 
+  geom_line(aes(x=df3$year,y=df3$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df3$year), breaks = df3$year) +
+  labs(x ="Year", y = "Total Barrels",title = "500,001 to 1,000,000 Barrels")
+
+df2 <- brew[brew$brewer_size == '6,000,001 Barrels and Over',]
+p2 <- ggplot(df2) + 
+  geom_line(aes(x=df2$year,y=df2$total_barrels,color='total')) + 
+  geom_line(aes(x=df2$year,y=df2$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df1$year), breaks = df1$year) +
+  labs(x ="Year", y = "Total Barrels",title = "6,000,001 Barrels and Over")
+
+brew$ship_total <- brew$total_shipped/brew$total_barrels
+df1 <- brew[brew$brewer_size == '1,001 to 7,500 Barrels',]
+p1 <- ggplot(df1) + 
+  geom_line(aes(x=df1$year,y=df1$total_barrels,color='total')) + 
+  geom_line(aes(x=df1$year,y=df1$taxable_removals,color='tax free')) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_continuous("Year", labels = as.character(df1$year), breaks = df1$year) +
+  labs(x ="Year", y = "Total Barrels",title = "1001 to 7500 barrels")
+
+ggarrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,ncol=3,nrow=3)
+
+
+
+```
+
+```{r}
+head(material)
+material <- material[str_detect(tolower(material$material_type),'total') == F,]
+table(material$material_type)
+unique(material$type)
+unique(material$data_type)
+head(material)
+```
+
+
+```{r}
+# let's have a brief overview of the material table.
+head(material)
+material <- na.omit(material)
+table(material$type)
+table(material$year,material$type)
+
+# this table tells us that we have equal entries for different materials type, so it is fair for us to compare each material type ytd/mtd. Also, I combine year and month together to get a more specific date for further reference.
+material$yrmon <- paste(material$year,material$month)
+
+# let's first draw a common plot factorized by material type here.
+ggplot(data=material)+geom_boxplot(aes(x=as.factor(material$type),y=material$month_current))
+ggplot(data=material)+geom_boxplot(aes(x=as.factor(material$year),y=material$ytd_current))
+
+# We can see that malt products has much higher volume that other categories, so I am going to eliminate malt type temporarily for easier comparisons of other categories.
+m1 <- material[material$type != 'Malt and malt products',]
+
+# Draw boxplots to check outliers in the dataset
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$type),y=m1$month_current))
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$year),y=m1$ytd_current))
+
+# From the boxplot we can see there is one outerlier that has way higher volume than all other entries. Since this number is not representative, I eliminate this number for a more accurate judgment on a broader range.
+m1 <- m1[m1$month_current < 2e+08,]
+
+# After eliminating the outerliers, do data visualization.
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$type),y=m1$month_current))
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$type),y=m1$ytd_current))
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$month),y=m1$month_current))
+ggplot(data=m1)+geom_boxplot(aes(x=as.factor(m1$year),y=m1$ytd_current))
+
+# From month plot,we can see that sugar & syrups,rice and corn are three big type that lead the market regardless of timeline; From year graph, we don't have any records on 2015,2016,2017 yet. All the month data viewed on by month are highly right skewed, which may suggest there is difference on sales volume of beer. From year data, we can see each year we have a group of outliers over 7.5e+08, so I filter to that group for detailed checkout.
+m2 <- m1[m1$ytd_current > 5e+08,]
+unique(m2$month)
+unique(m2$year)
+unique(m2$type)
+
+# From here we find that only sugar, corn and rice has volume(ytd) over 5e+08, I would like to investigate in this section more to see if there is any difference in volume on different month/year.
+ma <- table(m2$month,m2$type)
+barplot(ma,beside = T,legend=rownames(ma),args.legend = list(x = "topleft"))
+ma2 <- table(m2$type,m2$year)
+barplot(ma2,beside = T,legend=rownames(ma2),args.legend = list(x = "bottomleft"))
+
+# Generally, volume increases from Jun to Dec constantly. All entries that has ytd value that over boundaries are within Jun-Dec timeframe. For corn and rice, there is no big difference from October to December. For sugar, it dominates the market from August all the way to December. Now let's get back to Malt materials and check details of this dominant material in the market.
+m3 <- material[material$type == 'Malt and malt products',]
+ggplot(data=m3)+geom_point(aes(x=m3$month,y=m3$month_current))
+
+# There is one outerlier that has current mtd volume less than 2.0e+08.This number is not representative so I will remove this outerlier here.
+m3 <- m3[m3$month_current > 2.0e+08, ]
+malt_combine <- ggplot(data=m3)+geom_point(aes(x=m3$yrmon,y=m3$month_current))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  scale_x_discrete("Timeline", labels = as.character(m3$year), breaks = m3$year)
+
+ggplot(data=m3)+geom_boxplot(aes(x=as.factor(m3$year),y=m3$ytd_current))+scale_x_discrete("Year", labels = as.character(m3$year), breaks = m3$year) +labs(title='Year')
+
+ggplot(data=m3)+geom_boxplot(aes(x=as.factor(m3$month),y=m3$month_current))+scale_x_discrete("Month", labels = as.character(m3$month), breaks = m3$month)+labs(title='Month')
+
+# Interestingly enough, we can see that there is an reverse than on malt materials brewer compared to all other categories. From year to year, there is slight decrease trend but that tend is not very obvious. There is potential that malt materials are replaced by other materials overtime but more evidence and research need to perform on that. However, on month trend pic,there is a increasing trend from January to June and decreases since then.It reaches lowest point during December, while at the same time all other categories are increasing from Jun.
+
+
+```
+Let's move to the third table here to discover underlying information from different state.
+
+```{r}
+head(state)
+state <- na.omit(state)
+# remove aggregate value
+state <- state[str_detect(tolower(state$state),'total') == F,]
+quantile(state$barrels,c(0.25,0.5,0.75,1))
+```
+Let's do some general visualization here for exploration.
+
+```{r}
+ggplot(data=state)+geom_boxplot(aes(x=as.factor(type),y=barrels))
+
+# We can see that bottles and cans lead the market and all outliers in the dataset from this sub-category. For easier comparison, I separate bottles and cans category from the other two here.
+boc <- state[state$type == 'Bottles and Cans',]
+other <- state[state$type != 'Bottles and Cans',]
+
+# Visualize the boc data and find out outliers shown in the previous plot.
+ggplot(data=boc)+geom_boxplot(aes(x=as.factor(state),y=barrels))
+boc_hi <- boc[boc$barrels > 5.0e+06,]
+boc_ge <- boc[boc$barrels < 5.0e+06,]
+ggplot(data=boc_hi)+geom_boxplot(aes(x=as.factor(state),y=barrels))
+ggplot(data=boc_ge)+geom_boxplot(aes(x=as.factor(state),y=barrels))
+
+# From here we can see that CA, CO, OH, TX are the four leading states here. But to check how geolocation dominants the difference, I use states appeared in boc_hi to calculate the percentage of total barrels here.
+length(unique(boc_hi$state))
+length(unique(boc$state))
+boc_hiv <- boc[boc$state %in% unique(boc_hi$state),]
+# add state population to data
+statex77 <- as.data.frame(state.x77)
+keys = state.abb
+values = statex77[,1]
+d <- rbind(keys,values)
+
+# subset(dat, hospital %in% goodHosp)
+percent <- round(sum(boc_hiv$barrels)/sum(boc$barrels)*100,2)
+print(paste("There are", length(unique(boc_hi$state)),"covered", percent ," percent of total barrels in bottles and cans"))
+
+# From the state information we can there is a 80-20 rule in bottles and cans. Now I am going to explore on other categories here.
+ggplot(data=other)+geom_boxplot(aes(x=as.factor(state),y=barrels))
+table(other$state)
+
+# Let's to check the same states to other type beer here.
+other_barrel <- round(sum(boc$barrels)/sum(other$barrels),1)
+other_hiv <- other[other$state %in% unique(boc_hi$state),]
+percent_o <- round(sum(other_hiv$barrels)/sum(other$barrels)* 100,2)
+print(paste("There are", length(unique(boc_hi$state)),"covered", percent_o ," percent of total barrels in in-premises and kegs"))
+print(paste("Bottles and cans are",other_barrel,"times than Kegs and on-premises type on barrels"))
+```
+
+
+```{r}
+head(tax)
+state <- na.omit(tax)
+unique(tax$type)
+tm <- table(tax$type,tax$tax_status)
+tm
+ggplot(data=tax)+geom_boxplot(aes(x=tax$tax_status,y=tax$ytd_current))
+```
+Check Colinearily between different columns. From here I don't think it is not necessary to perform corrplot on tax dataset.
+```{r}
+
+taxn <- select_if(subset(tax,select = -c(year,month)), is.numeric)
+brewn <- select_if(subset(brew,select = -c(year)), is.numeric)
+materialn <- select_if(subset(material,select = -c(year,month)), is.numeric)
+corrplot(cor(taxn),method="number")
+corrplot(cor(brewn),method="number")
+corrplot(cor(materialn),method="number")
+```
+Fit Models to Brew and Material Datasets.
+
+```{r}
+head(brew)
+# Fit model on non-colinear columns
+lm1 <- lm(data = brew,total_barrels~year+brewer_size+n_of_brewers)
+summary(lm1)
+RF2 = randomForest(total_barrels~year+brewer_size+n_of_brewers, data=brew,nodsize = 11, ntree=500)
+RF2$importance
+```
+# Material Regression Model
+
+```{r}
+lm2 <- lm(data = material, month_current~year+month+type)
+summary(lm2)
+ols_coll_diag(lm2)
+ols_plot_resid_fit_spread(lm2)
+ols_plot_obs_fit(lm2)
+
+RF1 = randomForest( month_current~year+month+type, data = material, nodsize = 11, ntree=500)
+RF1$importance
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
