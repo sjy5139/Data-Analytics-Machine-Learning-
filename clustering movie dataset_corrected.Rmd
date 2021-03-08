@@ -1,0 +1,172 @@
+---
+title: "Movie Data Clustering Analysis"
+author: "Shimin"
+date: "2/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages(c("cluster", "factoextra"))
+library(cluster)
+library(ggplot2)
+library(factoextra)
+library(fpc)
+library(tidyverse)
+library(caret)
+library(class)
+library(e1071)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+# Data Preparation
+
+In data preparation, I checked the NA value(no NUll value here in this dataset) and get dummy for categorical variable, normalized data for unbiased analysis.
+
+```{r}
+# Read csv file to movie dataset
+movie <- readRDS('/Users/shiminyu/Downloads/movie_data.rds', refhook = NULL)
+str(movie)
+
+# Transform variables of dataset
+movie <- na.omit(movie)
+movie_feature <- movie[,-2]
+movie_feature <- fastDummies::dummy_cols(movie_feature,remove_first_dummy = TRUE)
+movie_feature <- movie_feature[,-4]
+
+# visualize the data
+ggplot(movie,aes(x=budget,y=gross,color=review))+geom_point()
+# ggplot(movie,aes(x=budget,y=gross,color=sequel))+geom_point()
+
+# Normalization 
+# All different numerical values are highly different so I need to normalize the dataset.
+m <- apply(movie_feature,2,mean)
+s <- apply(movie_feature,2,sd)
+z <- scale(movie_feature,m,s)
+```
+# Hierarchical Clustering
+
+Firstly, I use unsupervised learning to do classification. Hierarchical clustering does not perform well on this dataste and being extremely biased on prediction.
+
+```{r}
+# Calculating Euclidean Distance
+distance <- dist(z)
+#print(distance,digits=2)
+
+# Cluster Dendrogram with complete linkage
+hc.c <- hclust(distance)
+plot(hc.c,hang = -1)
+
+# Cluster Dendrogram with Average Linkage
+hc.a <- hclust(distance,method = 'average')
+plot(hc.a,hang=-1)
+
+# Cluster Movie
+movie.c <- cutree(hc.c,2)
+movie.a <- cutree(hc.a,2)
+
+# Check Accuracy of Clustering
+table(movie$review,movie.c)
+table(movie$review,movie.a)
+```
+
+# K-Means Clustering
+
+Then I used K-Means clustering for next method. The performance improved from the previous model but still, there are many wrong predictions compared to actual review. Generally, It predict many more recommendation than actual situation.
+
+```{r}
+km <- kmeans(z, centers = 2, nstart = 25)
+km
+fviz_cluster(km, data = movie_feature)
+plot(gross~budget,movie,col=km$cluster,main='prediction')
+plot(gross~budget,movie,col=movie$review,main='actual')
+table(movie$review,km$cluster)
+
+```
+# K-Medoids Clustering
+
+K-Medoids is the best prediction for unsupervised learning algorithm I applied to data so far. It has highest accuracy in both categories.
+
+```{r}
+km2 <- pam(z,k=2)
+km2
+fviz_cluster(km2, data = movie_feature)
+plot(gross~budget,movie,col=km2$cluster,main='prediction')
+plot(gross~budget,movie,col=movie$review,main='actual')
+table(movie$review,km2$clustering)
+```
+
+# Supervised Learning - KNN-Clustering
+
+So far the unsupervised learning does not performed well here, so I tried supervised learning instead to do the clusteirng model.KNN clustering has higher accuracy in both training and test data than previous one. I split test and train data here to avoid overfitting issue.
+
+```{r}
+library(class)
+train <- z[1:300,]
+test <- z[301:395,]
+
+cl <- movie[1:300,2]
+cl <- as.vector(unlist(cl))
+dim(train)
+dim(test)
+
+length(cl)
+
+movie_pred <- knn(train,test,cl,k=19)
+movie_pred2 <- knn(train,z,cl,k=19)
+table(movie_pred,movie$review[301:395])
+table(movie_pred2,movie$review)
+
+```
+
+# SVM Algorithm
+
+For SVM, I will use the same train and test split in the previous method for comparison. SVM performed better than KNN in both train and test data. At this point of level, I will use SVM(Suport vector machine) as my final model for classification here.
+
+```{r}
+movie2 <- fastDummies::dummy_cols(movie,remove_first_dummy = TRUE)
+movie2[,-12]
+z1 <- as.data.frame(z)
+z1$review <- movie$review
+train1 <- z1[1:300,]
+test1 <- z1[301:395,]
+tuned <- tune(svm,review~.,data=train1,kernel='linear',ranges = list(cost = c(0.01,0.1,1,10,100)))
+summary(tuned)
+svmfit <- svm(review~.,data=train1,kernel='linear',cost = 10,scale=F)
+summary(svmfit)
+p <- predict(svmfit,test1,type='class')
+table(p,test1$review)
+svm_pred <- predict(svmfit,z1,type='class')
+table(svm_pred,z1$review)
+
+```
+
+# Binary Logistic Regression for Exploration purpose
+
+For the last model, I will apply logistic regression. I used this because I know previously that it has two classes and I could perform supervised learning on this dataset. The logistic model cannot directly predict classification but can offer me some insights on influential factors on the final prediction. Check summary of logistic model for further details.
+
+```{r}
+glmfit <- glm(review~.,family = 'binomial',data=train1)
+glmpred <- predict(glmfit,test1)
+head(as.data.frame(cbind(test1$review,
+glmpred)))
+summary(glmfit)
+```
+
+
+
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
